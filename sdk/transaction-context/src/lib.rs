@@ -978,7 +978,7 @@ impl BorrowedAccount<'_> {
         // has already resized the data to an extra MAX_PERMITTED_DATA_INCREASE bytes
         if additional > MAX_PERMITTED_DATA_INCREASE {
             self.account
-                .reserve(additional - MAX_PERMITTED_DATA_INCREASE);
+                .reserve(additional.saturating_sub(MAX_PERMITTED_DATA_INCREASE));
         }
 
         Ok(())
