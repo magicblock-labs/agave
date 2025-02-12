@@ -1247,15 +1247,16 @@ impl ClusterInfo {
                 .into_iter()
                 .flatten()
         };
-        let pings = pings
+        self.append_entrypoint_to_pulls(thread_pool, max_bloom_filter_bytes, &mut pulls);
+        let pulls = pulls
             .into_iter()
             .map(|(addr, ping)| (addr, Protocol::PingMessage(ping)));
         self.append_entrypoint_to_pulls(thread_pool, max_bloom_filter_bytes, pulls)
             .map(move |(gossip_addr, filter)| {
                 let request = Protocol::PullRequest(filter, self_info.clone());
                 (gossip_addr, request)
-            })
-            .chain(pings)
+            });
+        (pings, pulls.collect())
     }
 
     pub fn flush_push_queue(&self) {
@@ -1306,7 +1307,6 @@ impl ClusterInfo {
                 })
                 .collect()
         };
-        let entries = Rc::new(entries);
         push_messages
             .into_iter()
             .flat_map(move |(peer, msgs): (SocketAddr, Vec<usize>)| {
@@ -1316,6 +1316,7 @@ impl ClusterInfo {
                     .map(move |msgs| Protocol::PushMessage(self_id, msgs));
                 repeat(peer).zip(msgs)
             })
+            .collect()
     }
 
     // Generate new push and pull requests
@@ -1331,12 +1332,15 @@ impl ClusterInfo {
         // pull-request bloom filters, preventing pull responses to return the
         // same values back to the node itself. Note that packets will arrive
         // and are processed out of order.
-        let out = self.new_push_requests(stakes);
+        let mut out: Vec<_> = self.new_push_requests(stakes);
         if generate_pull_requests {
-            let reqs = self.new_pull_requests(thread_pool, gossip_validators, stakes);
-            Either::Right(out.chain(reqs))
-        } else {
-            Either::Left(out)
+            let (pings, pull_requests) =
+                self.new_pull_requests(thread_pool, gossip_validators, stakes);
+            let pings = pings
+                .into_iter()
+                .map(|(addr, ping)| (addr, Protocol::PingMessage(ping)));
+            out.extend(pull_requests);
+            out.extend(pings);
         }
     }
 
@@ -1357,16 +1361,8 @@ impl ClusterInfo {
             gossip_validators,
             stakes,
             generate_pull_requests,
-        )
-        .filter_map(|(addr, data)| make_gossip_packet(addr, &data, &self.stats))
-        .for_each(|pkt| packet_batch.push(pkt));
-        if !packet_batch.is_empty() {
-            if let Err(TrySendError::Full(packet_batch)) = sender.try_send(packet_batch) {
-                self.stats
-                    .gossip_transmit_packets_dropped_count
-                    .add_relaxed(packet_batch.len() as u64);
-            }
-        }
+        );
+        send_gossip_packets(reqs, recycler, sender, &self.stats);
         self.stats
             .gossip_transmit_loop_iterations_since_last_report
             .add_relaxed(1);
@@ -1607,11 +1603,7 @@ impl ClusterInfo {
         if !requests.is_empty() {
             let response = self.handle_pull_requests(thread_pool, recycler, requests, stakes);
             if !response.is_empty() {
-                if let Err(TrySendError::Full(response)) = response_sender.try_send(response) {
-                    self.stats
-                        .gossip_packets_dropped_count
-                        .add_relaxed(response.len() as u64);
-                }
+                let _ = response_sender.send(response);
             }
         }
     }
@@ -1873,6 +1865,10 @@ impl ClusterInfo {
         if messages.is_empty() {
             return;
         }
+        let num_crds_values: u64 = messages.iter().map(|(_, data)| data.len() as u64).sum();
+        self.stats
+            .push_message_value_count
+            .add_relaxed(num_crds_values);
         // Origins' pubkeys of upserted crds values.
         let origins: HashSet<_> = {
             let _st = ScopedTimer::from(&self.stats.process_push_message);
@@ -1882,9 +1878,16 @@ impl ClusterInfo {
         // Generate prune messages.
         let prune_messages = self.generate_prune_messages(thread_pool, origins, stakes);
         let mut packet_batch = make_gossip_packet_batch(prune_messages, recycler, &self.stats);
-        self.new_push_requests(stakes)
-            .filter_map(|(addr, data)| make_gossip_packet(addr, &data, &self.stats))
-            .for_each(|pkt| packet_batch.push(pkt));
+        let new_push_requests = self.new_push_requests(stakes);
+        for (address, request) in new_push_requests {
+            if ContactInfo::is_valid_address(&address, &self.socket_addr_space) {
+                if let Some(pkt) = make_gossip_packet(address, &request, &self.stats) {
+                    packet_batch.push(pkt);
+                }
+            } else {
+                trace!("Dropping Gossip push response, as destination is unknown");
+            }
+        }
         if !packet_batch.is_empty() {
             if let Err(TrySendError::Full(packet_batch)) = response_sender.try_send(packet_batch) {
                 self.stats
@@ -3018,11 +3021,7 @@ fn send_gossip_packets<S: Borrow<SocketAddr>>(
     let pkts = pkts.into_iter();
     if pkts.len() != 0 {
         let pkts = make_gossip_packet_batch(pkts, recycler, stats);
-        if let Err(TrySendError::Full(pkts)) = sender.try_send(pkts) {
-            stats
-                .gossip_packets_dropped_count
-                .add_relaxed(pkts.len() as u64);
-        }
+        let _ = sender.send(pkts);
     }
 }
 
