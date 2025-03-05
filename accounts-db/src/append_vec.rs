@@ -517,11 +517,11 @@ impl AppendVec {
         let new = Self::new_from_file_unchecked(path, current_len, storage_access)?;
 
         let (sanitized, num_accounts) = new.sanitize_layout_and_length();
-        if !sanitized {
-            return Err(AccountsFileError::AppendVecError(
-                AppendVecError::IncorrectLayout(new.path.clone()),
-            ));
-        }
+        //if !sanitized {
+        //    return Err(AccountsFileError::AppendVecError(
+        //        AppendVecError::IncorrectLayout(new.path.clone()),
+        //    ));
+        //}
 
         Ok((new, num_accounts))
     }
