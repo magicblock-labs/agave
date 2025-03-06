@@ -579,7 +579,7 @@ impl AppendVec {
             append_lock: Mutex::new(()),
             current_len: AtomicUsize::new(current_len),
             file_size,
-            remove_file_on_drop: AtomicBool::new(true),
+            remove_file_on_drop: AtomicBool::new(false),
         })
     }
 
