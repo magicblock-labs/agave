@@ -137,7 +137,7 @@ pub struct TransactionProcessingEnvironment<'a> {
 #[cfg_attr(feature = "frozen-abi", derive(AbiExample))]
 #[cfg_attr(
     feature = "dev-context-only-utils",
-    field_qualifiers(slot(pub), epoch(pub))
+    field_qualifiers(slot(pub), epoch(pub), sysvar_cache(pub))
 )]
 pub struct TransactionBatchProcessor<FG: ForkGraph> {
     /// Bank slot (i.e. block)
@@ -302,11 +302,6 @@ impl<FG: ForkGraph> TransactionBatchProcessor<FG> {
 
     pub fn sysvar_cache(&self) -> RwLockReadGuard<SysvarCache> {
         self.sysvar_cache.read().unwrap()
-    }
-
-    /// Obtains write lock on `SysvarCache`
-    pub fn sysvar_cache_mut(&self) -> RwLockWriteGuard<SysvarCache> {
-        self.sysvar_cache.write().unwrap()
     }
 
     /// Main entrypoint to the SVM.
