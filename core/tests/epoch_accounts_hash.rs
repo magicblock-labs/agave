@@ -3,6 +3,7 @@
 
 use {
     crate::snapshot_utils::create_tmp_accounts_dir_for_tests,
+    agave_feature_set as feature_set,
     log::*,
     solana_accounts_db::{
         accounts_db::CalcAccountsHashDataSource, accounts_hash::CalcAccountsHashConfig,
@@ -31,7 +32,6 @@ use {
     solana_sdk::{
         clock::Slot,
         epoch_schedule::EpochSchedule,
-        feature_set,
         native_token::LAMPORTS_PER_SOL,
         pubkey::Pubkey,
         signature::{Keypair, Signer},
@@ -160,7 +160,7 @@ impl TestEnvironment {
 struct BackgroundServices {
     exit: Arc<AtomicBool>,
     accounts_background_service: ManuallyDrop<AccountsBackgroundService>,
-    snapshot_controller: SnapshotController,
+    snapshot_controller: Arc<SnapshotController>,
     accounts_hash_verifier: ManuallyDrop<AccountsHashVerifier>,
     snapshot_packager_service: ManuallyDrop<SnapshotPackagerService>,
 }
@@ -175,6 +175,12 @@ impl BackgroundServices {
         bank_forks: Arc<RwLock<BankForks>>,
     ) -> Self {
         info!("Starting background services...");
+        let (snapshot_request_sender, snapshot_request_receiver) = crossbeam_channel::unbounded();
+        let snapshot_controller = Arc::new(SnapshotController::new(
+            snapshot_request_sender.clone(),
+            snapshot_config.clone(),
+            bank_forks.read().unwrap().root(),
+        ));
 
         let pending_snapshot_packages = Arc::new(Mutex::new(PendingSnapshotPackages::default()));
         let snapshot_packager_service = SnapshotPackagerService::new(
@@ -182,7 +188,7 @@ impl BackgroundServices {
             None,
             exit.clone(),
             cluster_info.clone(),
-            snapshot_config.clone(),
+            snapshot_controller.clone(),
             false,
         );
 
@@ -192,18 +198,11 @@ impl BackgroundServices {
             accounts_package_receiver,
             pending_snapshot_packages,
             exit.clone(),
-            snapshot_config.clone(),
+            snapshot_controller.clone(),
         );
 
-        let (snapshot_request_sender, snapshot_request_receiver) = crossbeam_channel::unbounded();
-        let snapshot_controller = SnapshotController::new(
-            snapshot_request_sender.clone(),
-            snapshot_config.clone(),
-            bank_forks.read().unwrap().root(),
-        );
         let snapshot_request_handler = SnapshotRequestHandler {
-            snapshot_config: snapshot_config.clone(),
-            snapshot_request_sender,
+            snapshot_controller: snapshot_controller.clone(),
             snapshot_request_receiver,
             accounts_package_sender,
         };

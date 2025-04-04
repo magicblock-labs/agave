@@ -31,7 +31,6 @@ use {
     solana_client::connection_cache::Protocol,
     solana_entry::entry::Entry,
     solana_faucet::faucet::request_airdrop_transaction,
-    solana_feature_set as feature_set,
     solana_gossip::cluster_info::ClusterInfo,
     solana_inline_spl::{
         token::{SPL_TOKEN_ACCOUNT_MINT_OFFSET, SPL_TOKEN_ACCOUNT_OWNER_OFFSET},
@@ -44,6 +43,7 @@ use {
     },
     solana_metrics::inc_new_counter_info,
     solana_perf::packet::PACKET_DATA_SIZE,
+    solana_program_pack::Pack,
     solana_rpc_client_api::{
         config::*,
         custom_error::RpcCustomError,
@@ -65,7 +65,6 @@ use {
         prioritization_fee_cache::PrioritizationFeeCache,
         snapshot_config::SnapshotConfig,
         snapshot_utils,
-        verify_precompiles::verify_precompiles,
     },
     solana_runtime_transaction::runtime_transaction::RuntimeTransaction,
     solana_sdk::{
@@ -85,11 +84,11 @@ use {
             self, AddressLoader, MessageHash, SanitizedTransaction, TransactionError,
             VersionedTransaction, MAX_TX_ACCOUNT_LOCKS,
         },
-        transaction_context::TransactionAccount,
     },
     solana_send_transaction_service::send_transaction_service::TransactionInfo,
     solana_stake_program,
     solana_storage_bigtable::Error as StorageError,
+    solana_transaction_context::TransactionAccount,
     solana_transaction_status::{
         map_inner_instructions, BlockEncodingOptions, ConfirmedBlock,
         ConfirmedTransactionStatusWithSignature, ConfirmedTransactionWithStatusMeta,
@@ -103,7 +102,6 @@ use {
             interest_bearing_mint::InterestBearingConfig, scaled_ui_amount::ScaledUiAmountConfig,
             BaseStateWithExtensions, StateWithExtensions,
         },
-        solana_program::program_pack::Pack,
         state::{Account as TokenAccount, Mint},
     },
     std::{
@@ -2414,21 +2412,10 @@ pub(crate) fn optimize_filters(filters: &mut [RpcFilterType]) {
     })
 }
 
-fn verify_transaction(
-    transaction: &SanitizedTransaction,
-    feature_set: &Arc<feature_set::FeatureSet>,
-) -> Result<()> {
+fn verify_transaction(transaction: &SanitizedTransaction) -> Result<()> {
     #[allow(clippy::question_mark)]
     if transaction.verify().is_err() {
         return Err(RpcCustomError::TransactionSignatureVerificationFailure.into());
-    }
-
-    let move_precompile_verification_to_svm =
-        feature_set.is_active(&feature_set::move_precompile_verification_to_svm::id());
-    if !move_precompile_verification_to_svm {
-        if let Err(e) = verify_precompiles(transaction, feature_set) {
-            return Err(RpcCustomError::TransactionPrecompileVerificationFailure(e).into());
-        }
     }
 
     Ok(())
@@ -3884,7 +3871,7 @@ pub mod rpc_full {
             }
 
             if !skip_preflight {
-                verify_transaction(&transaction, &preflight_bank.feature_set)?;
+                verify_transaction(&transaction)?;
 
                 if !meta.config.skip_preflight_health_check {
                     match meta.health.check() {
@@ -4001,7 +3988,7 @@ pub mod rpc_full {
             let transaction =
                 sanitize_transaction(unsanitized_tx, bank, bank.get_reserved_account_keys())?;
             if sig_verify {
-                verify_transaction(&transaction, &bank.feature_set)?;
+                verify_transaction(&transaction)?;
             }
 
             let TransactionSimulationResult {
@@ -4507,6 +4494,7 @@ pub mod tests {
             rpc_service::service_runtime,
             rpc_subscriptions::RpcSubscriptions,
         },
+        agave_reserved_account_keys::ReservedAccountKeys,
         bincode::deserialize,
         jsonrpc_core::{futures, ErrorCode, MetaIoHandler, Output, Response, Value},
         jsonrpc_core_client::transports::local,
@@ -4520,6 +4508,7 @@ pub mod tests {
             genesis_utils::{create_genesis_config, GenesisConfigInfo},
             get_tmp_ledger_path,
         },
+        solana_program_option::COption,
         solana_rpc_client_api::{
             custom_error::{
                 JSON_RPC_SERVER_ERROR_BLOCK_NOT_AVAILABLE,
@@ -4548,7 +4537,6 @@ pub mod tests {
                 Message, MessageHeader, VersionedMessage,
             },
             nonce::{self, state::DurableNonce},
-            reserved_account_keys::ReservedAccountKeys,
             rpc_port,
             signature::{Keypair, Signer},
             slot_hashes::SlotHashes,
@@ -4578,7 +4566,6 @@ pub mod tests {
                 mint_close_authority::MintCloseAuthority, BaseStateWithExtensionsMut,
                 ExtensionType, StateWithExtensionsMut,
             },
-            solana_program::{program_option::COption, pubkey::Pubkey as SplTokenPubkey},
             state::{AccountState as TokenAccountState, Mint},
         },
         std::{borrow::Cow, collections::HashMap, net::Ipv4Addr},
@@ -4929,11 +4916,13 @@ pub mod tests {
 
         fn update_prioritization_fee_cache(&self, transactions: Vec<Transaction>) {
             let bank = self.working_bank();
-            let prioritization_fee_cache = &self.meta.prioritization_fee_cache;
+
             let transactions: Vec<_> = transactions
                 .into_iter()
                 .map(RuntimeTransaction::from_transaction_for_tests)
                 .collect();
+
+            let prioritization_fee_cache = &self.meta.prioritization_fee_cache;
             prioritization_fee_cache.update(&bank, transactions.iter());
         }
 
@@ -7718,12 +7707,12 @@ pub mod tests {
             let rpc = RpcHandler::start();
             let bank = rpc.working_bank();
             let RpcHandler { io, meta, .. } = rpc;
-            let mint = SplTokenPubkey::new_from_array([2; 32]);
-            let owner = SplTokenPubkey::new_from_array([3; 32]);
-            let delegate = SplTokenPubkey::new_from_array([4; 32]);
+            let mint = Pubkey::new_from_array([2; 32]);
+            let owner = Pubkey::new_from_array([3; 32]);
+            let delegate = Pubkey::new_from_array([4; 32]);
             let token_account_pubkey = solana_pubkey::new_rand();
             let token_with_different_mint_pubkey = solana_pubkey::new_rand();
-            let new_mint = SplTokenPubkey::new_from_array([5; 32]);
+            let new_mint = Pubkey::new_from_array([5; 32]);
             if program_id == solana_inline_spl::token_2022::id() {
                 // Add the token account
                 let account_base = TokenAccount {
@@ -8219,9 +8208,9 @@ pub mod tests {
         let bank = rpc.working_bank();
         let RpcHandler { io, meta, .. } = rpc;
 
-        let mint = SplTokenPubkey::new_from_array([2; 32]);
-        let owner = SplTokenPubkey::new_from_array([3; 32]);
-        let delegate = SplTokenPubkey::new_from_array([4; 32]);
+        let mint = Pubkey::new_from_array([2; 32]);
+        let owner = Pubkey::new_from_array([3; 32]);
+        let delegate = Pubkey::new_from_array([4; 32]);
         let token_account_pubkey = solana_pubkey::new_rand();
         let amount = 420;
         let delegated_amount = 30;
