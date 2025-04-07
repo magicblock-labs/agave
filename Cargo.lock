@@ -4530,9 +4530,9 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 
 [[package]]
 name = "openssl"
-version = "0.10.71"
+version = "0.10.72"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e14130c6a98cd258fdcb0fb6d744152343ff729cbfcb28c656a9d12b999fbcd"
+checksum = "fedfea7d58a1f73118430a55da6a286e7b044961736ce96a16a17068ea25e5da"
 dependencies = [
  "bitflags 2.9.0",
  "cfg-if 1.0.0",
@@ -4571,9 +4571,9 @@ dependencies = [
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.106"
+version = "0.9.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8bb61ea9811cc39e3c2069f40b8b8e2e70d8569b361f879786cc7ed48b777cdd"
+checksum = "8288979acd84749c744a9014b4382d42b8f7b2592847b5afb2ed29e5d16ede07"
 dependencies = [
  "cc",
  "libc",
@@ -6895,7 +6895,6 @@ name = "solana-bpf-loader-program"
 version = "2.3.0"
 dependencies = [
  "agave-feature-set",
- "agave-precompiles",
  "assert_matches",
  "bincode",
  "criterion",
@@ -7563,8 +7562,8 @@ dependencies = [
  "serial_test",
  "slab",
  "solana-accounts-db",
- "solana-address-lookup-table-program",
  "solana-bloom",
+ "solana-bpf-loader-program",
  "solana-builtins-default-costs",
  "solana-client",
  "solana-compute-budget",
@@ -9140,7 +9139,6 @@ name = "solana-program-runtime"
 version = "2.3.0"
 dependencies = [
  "agave-feature-set",
- "agave-precompiles",
  "assert_matches",
  "base64 0.22.1",
  "bincode",
@@ -9718,6 +9716,7 @@ dependencies = [
  "solana-nohash-hasher",
  "solana-nonce-account",
  "solana-perf",
+ "solana-precompile-error",
  "solana-program",
  "solana-program-runtime",
  "solana-pubkey",
@@ -10326,7 +10325,6 @@ name = "solana-svm"
 version = "2.3.0"
 dependencies = [
  "agave-feature-set",
- "agave-precompiles",
  "agave-reserved-account-keys",
  "ahash 0.8.11",
  "assert_matches",
@@ -10370,6 +10368,7 @@ dependencies = [
  "solana-native-token",
  "solana-nonce",
  "solana-nonce-account",
+ "solana-precompile-error",
  "solana-program-runtime",
  "solana-pubkey",
  "solana-rent",
@@ -10404,6 +10403,7 @@ name = "solana-svm-callback"
 version = "2.3.0"
 dependencies = [
  "solana-account",
+ "solana-precompile-error",
  "solana-pubkey",
 ]
 
